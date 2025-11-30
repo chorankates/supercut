@@ -20,7 +20,7 @@ class VideoCompiler
   end
 
   def compile
-    log(sprintf('reading map file[%s]', @map_file))
+    log(sprintf('reading map file[%s]', @map_file), :info)
     map = JSON.parse(File.read(@map_file))
     
     log(sprintf('processing[%d] video files...', map.size))
@@ -30,8 +30,9 @@ class VideoCompiler
     map.each do |video_path, trails|
       trails.each do |trail_name, timestamps|
         start_time, end_time = timestamps
-        
-        log(sprintf('  segment %d: [%s] (%s - %s', segment_index + 1, trail_name, start_time, end_time))
+
+        # TODO we should precompute the segment count so this is more useful
+        log(sprintf('  segment %d: [%s] (%s - %s)', segment_index + 1, trail_name, start_time, end_time), :info)
         
         # Create segment with overlay
         segment_file = create_segment(video_path, trail_name, start_time, end_time, segment_index)
@@ -80,8 +81,9 @@ class VideoCompiler
     # Using drawtext filter to overlay the trail name
     cmd = [
       'ffmpeg',
-      '-ss', start_seconds.to_s,
+      '-hwaccel', 'auto',
       '-i', video_path,
+      '-ss', start_seconds.to_s,
       '-t', duration.to_s,
       '-vf', build_drawtext_filter(trail_name),
       '-c:v', 'libx264',
@@ -95,11 +97,16 @@ class VideoCompiler
   end
 
   def build_drawtext_filter(text)
-    # Escape special characters for ffmpeg
-    escaped_text = text.gsub("'", "'\\\\\\''").gsub(":", "\\:")
-    
-    # Create a nice overlay with background box
-    "drawtext=text='#{escaped_text}':" \
+    escaped_text = escape_drawtext_text(text)
+    font_spec = if (fontfile = find_drawtext_fontfile)
+      # Escape any colons in path for ffmpeg filter parsing
+      "fontfile=#{fontfile.gsub(':', '\\:')}"
+    else
+      # Fall back to a common font name when fontconfig is available
+      "font=Helvetica"
+    end
+    "drawtext=#{font_spec}:" \
+    "text='#{escaped_text}':" \
     "fontsize=48:" \
     "fontcolor=white:" \
     "box=1:" \
@@ -107,6 +114,22 @@ class VideoCompiler
     "boxborderw=10:" \
     "x=(w-text_w)/2:" \
     "y=h-th-30"
+  end
+  
+  def escape_drawtext_text(text)
+    # Escape characters significant to ffmpeg drawtext parsing
+    text
+      .gsub('\\', '\\\\\\\\') # literal backslash
+      .gsub(':', '\\\\:')     # option separator
+      .gsub("'", "\\\\'")     # quote delimiter
+  end
+  
+  def find_drawtext_fontfile
+    candidates = [
+      '/System/Library/Fonts/Supplemental/Andale Mono.ttf',
+      '/System/Library/Fonts/Optima.ttc'
+    ]
+    candidates.find { |p| File.exist?(p) }
   end
 
   def concatenate_with_transitions
@@ -244,8 +267,8 @@ class VideoCompiler
   def run_command(cmd)
     cmd_str = cmd.join(' ')
     log(sprintf('running[%s]', cmd_str), :debug)
+    #success = system(*cmd, out: '/tmp/stdout.txt', err: '/tmp/stderr.txt')
     success = system(*cmd, out: '/dev/null', err: '/dev/null')
-    
     unless success
       raise "Command failed: #{cmd_str}"
     end
