@@ -50,8 +50,6 @@ class VideoCompiler
     concatenate_with_transitions
     
     log('cleaning up temporary files', :debug)
-    require 'pry'
-    binding.pry
     FileUtils.rm_rf(@temp_dir)
     
     log(sprintf('video compiled successfully[%s]', @output_file))
@@ -84,7 +82,6 @@ class VideoCompiler
       'ffmpeg',
       '-hwaccel', 'auto',
       '-i', video_path,
-      #'-preset', 'fast',
       '-ss', start_seconds.to_s,
       '-t', duration.to_s,
       '-vf', build_drawtext_filter(trail_name),
