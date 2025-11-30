@@ -4,6 +4,11 @@ require 'json'
 require 'fileutils'
 require 'tmpdir'
 
+def log(message, level = :debug)
+  puts sprintf('[%s] [%5s] %s', Time.now.strftime('%H.%M.%S'), level.to_s.upcase!, message)
+  exit(1) if level.eql?(:fatal)
+end
+
 class VideoCompiler
   TRANSITION_DURATION = 0.5 # Duration of white fade in seconds
   
@@ -15,10 +20,10 @@ class VideoCompiler
   end
 
   def compile
-    puts "Reading map file: #{@map_file}"
+    log(sprintf('reading map file[%s]', @map_file))
     map = JSON.parse(File.read(@map_file))
     
-    puts "Processing #{map.size} video file(s)..."
+    log(sprintf('processing[%d] video files...', map.size))
     
     # Process each segment from the map
     segment_index = 0
@@ -26,7 +31,7 @@ class VideoCompiler
       trails.each do |trail_name, timestamps|
         start_time, end_time = timestamps
         
-        puts "  Segment #{segment_index + 1}: #{trail_name} (#{start_time} - #{end_time})"
+        log(sprintf('  segment %d: [%s] (%s - %s', segment_index + 1, trail_name, start_time, end_time))
         
         # Create segment with overlay
         segment_file = create_segment(video_path, trail_name, start_time, end_time, segment_index)
@@ -39,15 +44,15 @@ class VideoCompiler
       end
     end
     
-    puts "\nConcatenating #{@segment_files.size} segments with transitions..."
+    log(sprintf('%s concatenating[%d] segments with transitions', "\n", @segment_files.size))
     concatenate_with_transitions
     
-    puts "\nCleaning up temporary files..."
+    log('cleaning up temporary files', :debug)
     require 'pry'
     binding.pry
     FileUtils.rm_rf(@temp_dir)
     
-    puts "\n✓ Video compiled successfully: #{@output_file}"
+    log(sprintf('video compiled successfully[%s]', @output_file))
   end
 
   private
@@ -238,6 +243,7 @@ class VideoCompiler
 
   def run_command(cmd)
     cmd_str = cmd.join(' ')
+    log(sprintf('running[%s]', cmd_str), :debug)
     success = system(*cmd, out: '/dev/null', err: '/dev/null')
     
     unless success
@@ -270,8 +276,7 @@ if __FILE__ == $PROGRAM_NAME
   output_file = ARGV[1]
 
   unless File.exist?(map_file)
-    puts "Error: Map file not found: #{map_file}"
-    exit 1
+    log(sprintf('map file[%s] not found', map_file), :fatal)
   end
 
   compiler = VideoCompiler.new(map_file, output_file)
