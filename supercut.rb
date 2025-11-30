@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 
 require 'json'
+require 'open3'
 require 'fileutils'
 require 'tmpdir'
 
@@ -83,6 +84,7 @@ class VideoCompiler
       'ffmpeg',
       '-hwaccel', 'auto',
       '-i', video_path,
+      #'-preset', 'fast',
       '-ss', start_seconds.to_s,
       '-t', duration.to_s,
       '-vf', build_drawtext_filter(trail_name),
@@ -267,11 +269,21 @@ class VideoCompiler
   def run_command(cmd)
     cmd_str = cmd.join(' ')
     log(sprintf('running[%s]', cmd_str), :debug)
-    #success = system(*cmd, out: '/tmp/stdout.txt', err: '/tmp/stderr.txt')
-    success = system(*cmd, out: '/dev/null', err: '/dev/null')
-    unless success
-      raise "Command failed: #{cmd_str}"
+    status = nil
+    Open3.popen2e(*cmd) do |stdin, stdout_and_err, wait_thr|
+      stdin.close
+      begin
+        until stdout_and_err.eof?
+          chunk = stdout_and_err.readpartial(4096)
+          $stdout.write(chunk)
+          $stdout.flush
+        end
+      rescue EOFError
+        # stream closed
+      end
+      status = wait_thr.value
     end
+    raise "Command failed: #{cmd_str}" unless status.success?
   end
 end
 
