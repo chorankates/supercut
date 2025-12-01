@@ -112,7 +112,7 @@ class VideoCompiler
     "boxcolor=black@0.5:" \
     "boxborderw=10:" \
     "x=(w-text_w)/2:" \
-    "y=h-th-30"
+    "y=h-th-30,format=yuv420p"
   end
   
   def escape_drawtext_text(text)
@@ -148,7 +148,7 @@ class VideoCompiler
         cmd = [
           'ffmpeg',
           '-i', segment,
-          '-vf', "fade=t=out:st=#{fade_start}:d=#{TRANSITION_DURATION}:color=white",
+          '-vf', "fade=t=out:st=#{fade_start}:d=#{TRANSITION_DURATION}:color=white,format=yuv420p",
           '-c:v', 'libx264',
           '-c:a', 'copy',
           '-y',
@@ -177,7 +177,10 @@ class VideoCompiler
       '-f', 'concat',
       '-safe', '0',
       '-i', concat_file,
-      '-c', 'copy',
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac',
+      '-movflags', '+faststart',
       '-y',
       @output_file
     ]
@@ -191,14 +194,14 @@ class VideoCompiler
     
     transition_file = File.join(@temp_dir, "transition_#{index.to_s.rjust(4, '0')}.mp4")
     
-    # Create a short white video with fade in from white
+    # Create a short solid white video (no black ramp)
     cmd = [
       'ffmpeg',
       '-f', 'lavfi',
       '-i', "color=white:s=#{width}x#{height}:r=#{fps}:d=#{TRANSITION_DURATION}",
       '-f', 'lavfi',
       '-i', 'anullsrc',
-      '-vf', "fade=t=in:st=0:d=#{TRANSITION_DURATION}:color=white,format=yuv420p",
+      '-vf', "format=yuv420p",
       '-c:v', 'libx264',
       '-c:a', 'aac',
       '-shortest',
@@ -258,7 +261,7 @@ class VideoCompiler
     fps_str = `#{fps_cmd.join(' ')}`.strip
     # Parse fraction like "30/1"
     num, den = fps_str.split('/').map(&:to_i)
-    fps = den > 0 ? num / den : 30
+    fps = den > 0 ? (num.to_f / den.to_f) : 30.0
     
     [width, height, fps]
   end
