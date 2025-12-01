@@ -33,6 +33,7 @@ found.each do |f|
   next if File.directory?(f)
   next if f.match(/\._/) # no silly hidden files
   next if f.match(/\.THM/) # no theme files from gopro
+  next if f.match(/\.LRV/) # don't even know what these are in the first place
   next unless f.match(/2025/) # temporary
   if files.has_key?(f)
     binding.pry
