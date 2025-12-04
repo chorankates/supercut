@@ -16,11 +16,18 @@ class VideoCompiler
   def initialize(map_file, output_file)
     @map_file = map_file
     @output_file = output_file
-    @temp_dir = Dir.mktmpdir('video_compile_')
+    # Use a stable temp directory based on the map file name for resumability
+    map_basename = File.basename(@map_file, '.*').gsub(/[^\w\-\.]/, '_')
+    @temp_dir = File.join(Dir.tmpdir, "video_compile_#{map_basename}")
+    FileUtils.mkdir_p(@temp_dir)
     @segment_files = []
   end
 
   def compile
+    if File.exist?(@output_file)
+      log(sprintf('output already exists[%s]; skipping compile', @output_file), :info)
+      return
+    end
     log(sprintf('reading map file[%s]', @map_file), :info)
     map = JSON.parse(File.read(@map_file))
     
@@ -49,8 +56,12 @@ class VideoCompiler
     log(sprintf('%s concatenating[%d] segments with transitions', "\n", @segment_files.size))
     concatenate_with_transitions
     
-    log('cleaning up temporary files', :debug)
-    FileUtils.rm_rf(@temp_dir)
+    if ENV['SUPERCUT_CLEAN'] == '1'
+      log('cleaning up temporary files', :debug)
+      FileUtils.rm_rf(@temp_dir)
+    else
+      log(sprintf('leaving temporary files in[%s] for resumability', @temp_dir), :debug)
+    end
     
     log(sprintf('video compiled successfully[%s]', @output_file))
   end
@@ -75,6 +86,11 @@ class VideoCompiler
     duration = end_seconds - start_seconds
     
     output_file = File.join(@temp_dir, "segment_#{index.to_s.rjust(4, '0')}.mp4")
+    
+    if File.exist?(output_file)
+      log(sprintf('skip: segment exists[%s]', output_file), :info)
+      return output_file
+    end
     
     # Extract segment and add text overlay
     # Using drawtext filter to overlay the trail name
@@ -132,30 +148,36 @@ class VideoCompiler
   end
 
   def concatenate_with_transitions
+    if File.exist?(@output_file)
+      log(sprintf('output already exists[%s], skipping concatenation', @output_file), :info)
+      return
+    end
     # Create segments with fade-out to white
     faded_segments = []
     
     @segment_files.each_with_index do |segment, i|
-      # Get video duration
-      duration = get_video_duration(segment)
-      
       # Add fade to white at the end (except for last segment)
       if i < @segment_files.size - 1
         faded_file = File.join(@temp_dir, "faded_#{i.to_s.rjust(4, '0')}.mp4")
-        
-        fade_start = duration - TRANSITION_DURATION
-        
-        cmd = [
-          'ffmpeg',
-          '-i', segment,
-          '-vf', "fade=t=out:st=#{fade_start}:d=#{TRANSITION_DURATION}:color=white,format=yuv420p",
-          '-c:v', 'libx264',
-          '-c:a', 'copy',
-          '-y',
-          faded_file
-        ]
-        
-        run_command(cmd)
+        if File.exist?(faded_file)
+          log(sprintf('skip: faded segment exists[%s]', faded_file), :info)
+        else
+          # Get video duration only if needed
+          duration = get_video_duration(segment)
+          fade_start = duration - TRANSITION_DURATION
+          
+          cmd = [
+            'ffmpeg',
+            '-i', segment,
+            '-vf', "fade=t=out:st=#{fade_start}:d=#{TRANSITION_DURATION}:color=white,format=yuv420p",
+            '-c:v', 'libx264',
+            '-c:a', 'copy',
+            '-y',
+            faded_file
+          ]
+          
+          run_command(cmd)
+        end
         faded_segments << faded_file
         
         # Create white frame transition
@@ -189,10 +211,14 @@ class VideoCompiler
   end
 
   def create_white_transition(reference_segment, index)
+    transition_file = File.join(@temp_dir, "transition_#{index.to_s.rjust(4, '0')}.mp4")
+    if File.exist?(transition_file)
+      log(sprintf('skip: transition exists[%s]', transition_file), :info)
+      return transition_file
+    end
+    
     # Get video properties from reference segment
     width, height, fps = get_video_properties(reference_segment)
-    
-    transition_file = File.join(@temp_dir, "transition_#{index.to_s.rjust(4, '0')}.mp4")
     
     # Create a short solid white video (no black ramp)
     cmd = [
