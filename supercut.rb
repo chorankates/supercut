@@ -25,8 +25,12 @@ class VideoCompiler
 
   def compile
     if File.exist?(@output_file)
-      log(sprintf('output already exists[%s]; skipping compile', @output_file), :info)
-      return
+      if clean_requested?
+        remove_if_exists(@output_file)
+      else
+        log(sprintf('output already exists[%s]; skipping compile', @output_file), :info)
+        return
+      end
     end
     log(sprintf('reading map file[%s]', @map_file), :info)
     map = JSON.parse(File.read(@map_file))
@@ -67,6 +71,16 @@ class VideoCompiler
   end
 
   private
+  
+  def clean_requested?
+    ENV['SUPERCUT_CLEAN'] == '1'
+  end
+  
+  def remove_if_exists(path)
+    return unless File.exist?(path)
+    log(sprintf('clean: removing[%s]', path), :debug)
+    FileUtils.rm_f(path)
+  end
 
   def parse_timestamp(timestamp)
     # Convert MM:SS to seconds
@@ -86,6 +100,10 @@ class VideoCompiler
     duration = end_seconds - start_seconds
     
     output_file = File.join(@temp_dir, "segment_#{index.to_s.rjust(4, '0')}.mp4")
+    
+    if clean_requested? && File.exist?(output_file)
+      remove_if_exists(output_file)
+    end
     
     if File.exist?(output_file)
       log(sprintf('skip: segment exists[%s]', output_file), :info)
@@ -149,8 +167,12 @@ class VideoCompiler
 
   def concatenate_with_transitions
     if File.exist?(@output_file)
-      log(sprintf('output already exists[%s], skipping concatenation', @output_file), :info)
-      return
+      if clean_requested?
+        remove_if_exists(@output_file)
+      else
+        log(sprintf('output already exists[%s], skipping concatenation', @output_file), :info)
+        return
+      end
     end
     # Create segments with fade-out to white
     faded_segments = []
@@ -159,6 +181,9 @@ class VideoCompiler
       # Add fade to white at the end (except for last segment)
       if i < @segment_files.size - 1
         faded_file = File.join(@temp_dir, "faded_#{i.to_s.rjust(4, '0')}.mp4")
+        if clean_requested? && File.exist?(faded_file)
+          remove_if_exists(faded_file)
+        end
         if File.exist?(faded_file)
           log(sprintf('skip: faded segment exists[%s]', faded_file), :info)
         else
@@ -212,6 +237,9 @@ class VideoCompiler
 
   def create_white_transition(reference_segment, index)
     transition_file = File.join(@temp_dir, "transition_#{index.to_s.rjust(4, '0')}.mp4")
+    if clean_requested? && File.exist?(transition_file)
+      remove_if_exists(transition_file)
+    end
     if File.exist?(transition_file)
       log(sprintf('skip: transition exists[%s]', transition_file), :info)
       return transition_file
