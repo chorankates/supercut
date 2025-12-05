@@ -183,9 +183,6 @@ class VideoCompiler
         faded_file = File.join(@temp_dir, "faded_#{i.to_s.rjust(4, '0')}.mp4")
         if clean_requested? && File.exist?(faded_file)
           remove_if_exists(faded_file)
-        end
-        if File.exist?(faded_file)
-          log(sprintf('skip: faded segment exists[%s]', faded_file), :info)
         else
           # Get video duration only if needed
           duration = get_video_duration(segment)
