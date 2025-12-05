@@ -60,13 +60,6 @@ class VideoCompiler
     log(sprintf('%s concatenating[%d] segments with transitions', "\n", @segment_files.size))
     concatenate_with_transitions
     
-    if ENV['SUPERCUT_CLEAN'] == '1'
-      log('cleaning up temporary files', :debug)
-      FileUtils.rm_rf(@temp_dir)
-    else
-      log(sprintf('leaving temporary files in[%s] for resumability', @temp_dir), :debug)
-    end
-    
     log(sprintf('video compiled successfully[%s]', @output_file))
   end
 
