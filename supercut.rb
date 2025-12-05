@@ -223,10 +223,10 @@ class VideoCompiler
       end
     end
 
-    # Create and append credits clip after the final segment
+    # Create and append credits clip(s) after the final segment
     if @segment_files.any?
-      credits_clip = create_credits_clip(map, @segment_files.last)
-      faded_segments << credits_clip if credits_clip
+      credits_clips = create_credits_clips(map, @segment_files.last)
+      credits_clips.each { |clip| faded_segments << clip }
     end
     
     # Create concat file list
@@ -282,58 +282,100 @@ class VideoCompiler
     transition_file
   end
 
-  def create_credits_clip(map, reference_segment)
-    credits_file = File.join(@temp_dir, 'credits.mp4')
-    if clean_requested? && File.exist?(credits_file)
-      remove_if_exists(credits_file)
-    end
-    return credits_file if File.exist?(credits_file)
-
-    # Build credits text file
-    credits_text = build_credits_text(map)
-    credits_txt_path = File.join(@temp_dir, 'credits.txt')
-    File.write(credits_txt_path, credits_text)
-
+  def create_credits_clips(map, reference_segment)
     width, height, fps = get_video_properties(reference_segment)
-    duration = compute_credits_duration_seconds(credits_text)
+    font_size = 36
+    line_spacing = 10
+    top_bottom_margin = 120
+    usable_height = [height - (2 * top_bottom_margin), height].max
+    approx_line_px = font_size + line_spacing
+    max_lines_per_page = [[(usable_height / approx_line_px).floor, 6].max, 40].min
 
-    font_spec = if (fontfile = find_drawtext_fontfile)
-      "fontfile=#{fontfile.gsub(':', '\\:')}"
-    else
-      "font=Helvetica"
+    # Build header and content lines separately for flexible pagination
+    date_str = Time.now.strftime('%Y-%m-%d')
+    header_lines_first = ['Credits', '', "Generated on #{date_str}", '']
+    content_lines = build_credits_lines(map)
+
+    # Create pages
+    pages = []
+    remaining = content_lines.dup
+    page_index = 0
+    while remaining.any?
+      page_index += 1
+      if page_index == 1
+        capacity = max_lines_per_page - header_lines_first.size
+        page_body = remaining.shift(capacity)
+        page_lines = header_lines_first + page_body
+      else
+        header_cont = ['Credits (cont.)', '']
+        capacity = max_lines_per_page - header_cont.size
+        page_body = remaining.shift(capacity)
+        page_lines = header_cont + page_body
+      end
+      pages << page_lines
     end
-    textfile_escaped = credits_txt_path.gsub(':', '\\:')
 
-    # Create a black background with centered multiline text
-    cmd = [
-      'ffmpeg',
-      '-f', 'lavfi',
-      '-i', "color=black:s=#{width}x#{height}:r=#{fps}:d=#{duration}",
-      '-f', 'lavfi',
-      '-i', 'anullsrc',
-      '-vf',
-      [
-        "drawtext=#{font_spec}:",
-        "textfile='#{textfile_escaped}':",
-        "fontsize=36:",
-        "fontcolor=white:",
-        "line_spacing=10:",
-        "box=1:",
-        "boxcolor=black@0.0:",
-        "boxborderw=0:",
-        "x=(w-text_w)/2:",
-        "y=(h-text_h)/2",
-        ",format=yuv420p,fade=t=in:st=0:d=0.5,fade=t=out:st=#{[duration - 0.6, 0.0].max}:d=0.6"
-      ].join,
-      '-c:v', 'libx264',
-      '-c:a', 'aac',
-      '-shortest',
-      '-y',
-      credits_file
-    ]
-
-    run_command(cmd)
-    credits_file
+    total_pages = pages.size
+    clips = []
+    pages.each_with_index do |page_lines, i|
+      page_num = (i + 1).to_s.rjust(3, '0')
+      credits_file = File.join(@temp_dir, "credits_page_#{page_num}.mp4")
+      credits_txt_path = File.join(@temp_dir, "credits_page_#{page_num}.txt")
+      if clean_requested? && File.exist?(credits_file)
+        remove_if_exists(credits_file)
+      end
+      if clean_requested? && File.exist?(credits_txt_path)
+        remove_if_exists(credits_txt_path)
+      end
+      if !File.exist?(credits_txt_path)
+        # Optionally append page indicator at bottom if multiple pages
+        page_lines_with_footer = if total_pages > 1
+          page_lines + ['',
+                        "Page #{i + 1} of #{total_pages}"]
+        else
+          page_lines
+        end
+        File.write(credits_txt_path, page_lines_with_footer.join("\n").rstrip + "\n")
+      end
+      unless File.exist?(credits_file)
+        duration = compute_credits_duration_seconds(File.read(credits_txt_path))
+        font_spec = if (fontfile = find_drawtext_fontfile)
+          "fontfile=#{fontfile.gsub(':', '\\:')}"
+        else
+          "font=Helvetica"
+        end
+        textfile_escaped = credits_txt_path.gsub(':', '\\:')
+        cmd = [
+          'ffmpeg',
+          '-f', 'lavfi',
+          '-i', "color=black:s=#{width}x#{height}:r=#{fps}:d=#{duration}",
+          '-f', 'lavfi',
+          '-i', 'anullsrc',
+          '-vf',
+          [
+            "drawtext=#{font_spec}:",
+            "textfile='#{textfile_escaped}':",
+            "fontsize=#{font_size}:",
+            "fontcolor=white:",
+            "line_spacing=#{line_spacing}:",
+            "box=1:",
+            "boxcolor=black@0.0:",
+            "boxborderw=0:",
+            "x=(w-text_w)/2:",
+            "y=(h-text_h)/2",
+            ",format=yuv420p,fade=t=in:st=0:d=0.5,fade=t=out:st=#{[duration - 0.6, 0.0].max}:d=0.6"
+          ].join,
+          '-c:v', 'libx264',
+          '-c:a', 'aac',
+          '-shortest',
+          '-y',
+          credits_file
+        ]
+        run_command(cmd)
+      end
+      clips << credits_file
+    end
+    clips
   end
 
   def compute_credits_duration_seconds(text)
@@ -359,6 +401,21 @@ class VideoCompiler
       lines << ''
     end
     lines.join("\n").rstrip + "\n"
+  end
+
+  def build_credits_lines(map)
+    lines = []
+    map.each do |video_path, trails|
+      lines << File.basename(video_path.to_s)
+      trails.each do |trail_name, timestamps|
+        start_t, end_t = timestamps
+        lines << "  • #{trail_name}: #{start_t} – #{end_t}"
+      end
+      lines << ''
+    end
+    # Ensure at least one line to avoid empty page
+    lines = ['No segments'] if lines.empty?
+    lines
   end
 
   def get_video_duration(video_file)
