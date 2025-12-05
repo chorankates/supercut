@@ -58,7 +58,7 @@ class VideoCompiler
     end
     
     log(sprintf('%s concatenating[%d] segments with transitions', "\n", @segment_files.size))
-    concatenate_with_transitions
+    concatenate_with_transitions(map)
     
     log(sprintf('video compiled successfully[%s]', @output_file))
   end
@@ -141,7 +141,7 @@ class VideoCompiler
     "x=(w-text_w)/2:" \
     "y=h-th-30,format=yuv420p"
   end
-  
+
   def escape_drawtext_text(text)
     # Escape characters significant to ffmpeg drawtext parsing
     text
@@ -149,7 +149,7 @@ class VideoCompiler
       .gsub(':', '\\\\:')     # option separator
       .gsub("'", "\\\\'")     # quote delimiter
   end
-  
+
   def find_drawtext_fontfile
     candidates = [
       '/System/Library/Fonts/Supplemental/Andale Mono.ttf',
@@ -158,7 +158,7 @@ class VideoCompiler
     candidates.find { |p| File.exist?(p) }
   end
 
-  def concatenate_with_transitions
+  def concatenate_with_transitions(map)
     if File.exist?(@output_file)
       if clean_requested?
         remove_if_exists(@output_file)
@@ -222,6 +222,12 @@ class VideoCompiler
         faded_segments << faded_file
       end
     end
+
+    # Create and append credits clip after the final segment
+    if @segment_files.any?
+      credits_clip = create_credits_clip(map, @segment_files.last)
+      faded_segments << credits_clip if credits_clip
+    end
     
     # Create concat file list
     concat_file = File.join(@temp_dir, 'concat_list.txt')
@@ -274,6 +280,85 @@ class VideoCompiler
     
     run_command(cmd)
     transition_file
+  end
+
+  def create_credits_clip(map, reference_segment)
+    credits_file = File.join(@temp_dir, 'credits.mp4')
+    if clean_requested? && File.exist?(credits_file)
+      remove_if_exists(credits_file)
+    end
+    return credits_file if File.exist?(credits_file)
+
+    # Build credits text file
+    credits_text = build_credits_text(map)
+    credits_txt_path = File.join(@temp_dir, 'credits.txt')
+    File.write(credits_txt_path, credits_text)
+
+    width, height, fps = get_video_properties(reference_segment)
+    duration = compute_credits_duration_seconds(credits_text)
+
+    font_spec = if (fontfile = find_drawtext_fontfile)
+      "fontfile=#{fontfile.gsub(':', '\\:')}"
+    else
+      "font=Helvetica"
+    end
+    textfile_escaped = credits_txt_path.gsub(':', '\\:')
+
+    # Create a black background with centered multiline text
+    cmd = [
+      'ffmpeg',
+      '-f', 'lavfi',
+      '-i', "color=black:s=#{width}x#{height}:r=#{fps}:d=#{duration}",
+      '-f', 'lavfi',
+      '-i', 'anullsrc',
+      '-vf',
+      [
+        "drawtext=#{font_spec}:",
+        "textfile='#{textfile_escaped}':",
+        "fontsize=36:",
+        "fontcolor=white:",
+        "line_spacing=10:",
+        "box=1:",
+        "boxcolor=black@0.0:",
+        "boxborderw=0:",
+        "x=(w-text_w)/2:",
+        "y=(h-text_h)/2",
+        ",format=yuv420p,fade=t=in:st=0:d=0.5,fade=t=out:st=#{[duration - 0.6, 0.0].max}:d=0.6"
+      ].join,
+      '-c:v', 'libx264',
+      '-c:a', 'aac',
+      '-shortest',
+      '-y',
+      credits_file
+    ]
+
+    run_command(cmd)
+    credits_file
+  end
+
+  def compute_credits_duration_seconds(text)
+    line_count = text.lines.size
+    base = 5.0
+    per_line = 0.4
+    [[base + (line_count * per_line), 8.0].max, 20.0].min
+  end
+
+  def build_credits_text(map)
+    lines = []
+    lines << 'Credits'
+    lines << ''
+    date_str = Time.now.strftime('%Y-%m-%d')
+    lines << "Generated on #{date_str}"
+    lines << ''
+    map.each do |video_path, trails|
+      lines << File.basename(video_path.to_s)
+      trails.each do |trail_name, timestamps|
+        start_t, end_t = timestamps
+        lines << "  • #{trail_name}: #{start_t} – #{end_t}"
+      end
+      lines << ''
+    end
+    lines.join("\n").rstrip + "\n"
   end
 
   def get_video_duration(video_file)
