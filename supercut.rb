@@ -199,8 +199,27 @@ class VideoCompiler
         transition_file = create_white_transition(segment, i)
         faded_segments << transition_file
       else
-        # Last segment doesn't need fade out
-        faded_segments << segment
+        # Last segment: fade out to black
+        faded_file = File.join(@temp_dir, "faded_#{i.to_s.rjust(4, '0')}.mp4")
+        if clean_requested? && File.exist?(faded_file)
+          remove_if_exists(faded_file)
+        else
+          duration = get_video_duration(segment)
+          fade_start = duration - TRANSITION_DURATION
+          
+          cmd = [
+            'ffmpeg',
+            '-i', segment,
+            '-vf', "fade=t=out:st=#{fade_start}:d=#{TRANSITION_DURATION}:color=black,format=yuv420p",
+            '-c:v', 'libx264',
+            '-c:a', 'copy',
+            '-y',
+            faded_file
+          ]
+          
+          run_command(cmd)
+        end
+        faded_segments << faded_file
       end
     end
     
