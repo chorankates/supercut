@@ -6,6 +6,7 @@ require 'fileutils'
 require 'tmpdir'
 
 def log(message, level = :debug)
+  return if level.eql?(:debug) and !debug_enabled?
   puts sprintf('[%s] [%5s] %s', Time.now.strftime('%H.%M.%S'), level.to_s.upcase!, message)
   exit(1) if level.eql?(:fatal)
 end
@@ -85,7 +86,7 @@ class VideoCompiler
       end
     end
     
-    log(sprintf('%s concatenating[%d] segments with transitions', "\n", @segment_files.size))
+    log(sprintf('concatenating[%d] segments with transitions', @segment_files.size))
     concatenate_with_transitions(map)
     
     log(sprintf('video compiled successfully[%s]', @output_file))
@@ -95,18 +96,6 @@ class VideoCompiler
   
   def clean_requested?
     ENV['SUPERCUT_CLEAN'] == '1'
-  end
-  
-  def remove_if_exists(path)
-    return unless File.exist?(path)
-    log(sprintf('clean: removing[%s]', path), :debug)
-    FileUtils.rm_f(path)
-  end
-  
-  def debug_enabled?
-    val = ENV['DEBUG']
-    return false if val.nil?
-    %w[1 true yes on].include?(val.to_s.downcase)
   end
 
   def parse_timestamp(timestamp)
@@ -673,6 +662,18 @@ class VideoCompiler
     end
     raise "Command failed: #{cmd_str}" unless status.success?
   end
+end
+
+def remove_if_exists(path)
+  return unless File.exist?(path)
+  log(sprintf('clean: removing[%s]', path), :debug)
+  FileUtils.rm_f(path)
+end
+
+def debug_enabled?
+  val = ENV['DEBUG']
+  return false if val.nil?
+  %w[1 true yes on].include?(val.to_s.downcase)
 end
 
 # Main execution
