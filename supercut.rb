@@ -102,6 +102,12 @@ class VideoCompiler
     log(sprintf('clean: removing[%s]', path), :debug)
     FileUtils.rm_f(path)
   end
+  
+  def debug_enabled?
+    val = ENV['DEBUG']
+    return false if val.nil?
+    %w[1 true yes on].include?(val.to_s.downcase)
+  end
 
   def parse_timestamp(timestamp)
     # Convert MM:SS to seconds
@@ -213,6 +219,9 @@ class VideoCompiler
         faded_file = File.join(@temp_dir, "faded_#{i.to_s.rjust(4, '0')}.mp4")
         if clean_requested? && File.exist?(faded_file)
           remove_if_exists(faded_file)
+        elsif File.exist?(faded_file)
+          log(sprintf('skip: faded exists[%s]', faded_file), :info)
+          next
         else
           # Get video duration only if needed
           duration = get_video_duration(segment)
@@ -652,8 +661,10 @@ class VideoCompiler
       begin
         until stdout_and_err.eof?
           chunk = stdout_and_err.readpartial(4096)
-          $stdout.write(chunk)
-          $stdout.flush
+          if debug_enabled?
+            $stdout.write(chunk)
+            $stdout.flush
+          end
         end
       rescue EOFError
         # stream closed
