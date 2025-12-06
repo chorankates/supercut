@@ -158,7 +158,7 @@ class VideoCompiler
       "font=Helvetica"
     end
     "drawtext=#{font_spec}:" \
-    "text='#{escaped_text}':" \
+    "text=#{escaped_text}:" \
     "fontsize=48:" \
     "fontcolor=white:" \
     "box=1:" \
