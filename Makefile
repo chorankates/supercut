@@ -5,7 +5,7 @@ SCRIPT := supercut.rb
 MAP ?= maps/testing-smaller_mba.json
 OUTPUT ?= output.mp4
 CREDITS_OUTPUT ?= credits-preview.mp4
-CREDITS_STYLE ?= pages   # pages | scroll
+CREDITS_STYLE ?= scroll   # pages | scroll
 LINES ?= 60
 SCROLL_SPEED ?= 80
 

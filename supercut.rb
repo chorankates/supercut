@@ -64,7 +64,7 @@ class VideoCompiler
       return
     end
     
-    log(sprintf('processing[%d] video files...', map.size))
+    log(sprintf('processing[%d] video files...', map.size), :info)
     
     # Process each segment from the map
     segment_index = 0
@@ -86,10 +86,13 @@ class VideoCompiler
       end
     end
     
-    log(sprintf('concatenating[%d] segments with transitions', @segment_files.size))
+    log(sprintf('concatenating[%d] segments with transitions', @segment_files.size), :info)
     concatenate_with_transitions(map)
-    
-    log(sprintf('video compiled successfully[%s]', @output_file))
+
+    log(sprintf('removing temporary files from[%s]', @temp_dir))
+    FileUtils.rm_rf(@temp_dir)
+
+    log(sprintf('video compiled successfully[%s]', @output_file), :info)
   end
 
   private
