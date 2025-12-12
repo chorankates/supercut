@@ -149,31 +149,31 @@ class VideoCompiler
   end
 
   def build_drawtext_filter(text)
-    escaped_text = escape_drawtext_text(text)
+    quoted_text = quote_drawtext_value(text)
     font_spec = if (fontfile = find_drawtext_fontfile)
-      # Escape any colons in path for ffmpeg filter parsing
-      "fontfile=#{fontfile.gsub(':', '\\:')}"
+      "fontfile=#{quote_drawtext_value(fontfile)}"
     else
-      # Fall back to a common font name when fontconfig is available
       "font=Helvetica"
     end
     "drawtext=#{font_spec}:" \
-    "text=#{escaped_text}:" \
+    "text=#{quoted_text}:" \
     "fontsize=48:" \
     "fontcolor=white:" \
     "box=1:" \
     "boxcolor=black@0.5:" \
     "boxborderw=10:" \
-    "x=(w-text_w)/2:" \
-    "y=h-th-30,format=yuv420p"
+    "x='(w-text_w)/2':" \
+    "y='h-th-30',format=yuv420p"
   end
 
-  def escape_drawtext_text(text)
-    # Escape characters significant to ffmpeg drawtext parsing
-    text
-      .gsub('\\', '\\\\\\\\') # literal backslash
-      .gsub(':', '\\\\:')     # option separator
-      .gsub("'", "\\\\'")     # quote delimiter
+  def quote_drawtext_value(value)
+    # Properly quote and escape a value for ffmpeg drawtext filter.
+    # Within single-quoted strings in ffmpeg, backslash is the escape character.
+    # We must escape: \ -> \\, ' -> \'
+    escaped = value
+      .gsub('\\', '\\\\\\\\')  # \ -> \\ (extra escaping for Ruby string + ffmpeg)
+      .gsub("'", "'\\\\''")    # ' -> '\'' (end quote, escaped quote, start quote)
+    "'#{escaped}'"
   end
 
   def find_drawtext_fontfile
@@ -383,11 +383,11 @@ class VideoCompiler
       unless File.exist?(credits_file)
         duration = compute_credits_duration_seconds(File.read(credits_txt_path))
         font_spec = if (fontfile = find_drawtext_fontfile)
-          "fontfile=#{fontfile.gsub(':', '\\:')}"
+          "fontfile=#{quote_drawtext_value(fontfile)}"
         else
           "font=Helvetica"
         end
-        textfile_escaped = credits_txt_path.gsub(':', '\\:')
+        textfile_quoted = quote_drawtext_value(credits_txt_path)
         cmd = [
           'ffmpeg',
           '-f', 'lavfi',
@@ -397,15 +397,15 @@ class VideoCompiler
           '-vf',
           [
             "drawtext=#{font_spec}:",
-            "textfile='#{textfile_escaped}':",
+            "textfile=#{textfile_quoted}:",
             "fontsize=#{font_size}:",
             "fontcolor=white:",
             "line_spacing=#{line_spacing}:",
             "box=1:",
             "boxcolor=black@0.0:",
             "boxborderw=0:",
-            "x=(w-text_w)/2:",
-            "y=(h-text_h)/2",
+            "x='(w-text_w)/2':",
+            "y='(h-text_h)/2'",
             ",format=yuv420p,fade=t=in:st=0:d=0.5,fade=t=out:st=#{[duration - 0.6, 0.0].max}:d=0.6"
           ].join,
           '-c:v', 'libx264',
@@ -448,23 +448,23 @@ class VideoCompiler
       File.write(credits_txt_path, (page_lines + (total_pages > 1 ? ['', "Page #{i + 1} of #{total_pages}"] : [])).join("\n").rstrip + "\n")
       duration = compute_credits_duration_seconds(File.read(credits_txt_path))
       font_spec = if (fontfile = find_drawtext_fontfile)
-        "fontfile=#{fontfile.gsub(':', '\\:')}"
+        "fontfile=#{quote_drawtext_value(fontfile)}"
       else
         "font=Helvetica"
       end
-      textfile_escaped = credits_txt_path.gsub(':', '\\:')
+      textfile_quoted = quote_drawtext_value(credits_txt_path)
       cmd = [
         'ffmpeg', '-f', 'lavfi', '-i', "color=black:s=#{width}x#{height}:r=#{fps}:d=#{duration}",
         '-f', 'lavfi', '-i', 'anullsrc',
         '-vf',
         [
           "drawtext=#{font_spec}:",
-          "textfile='#{textfile_escaped}':",
+          "textfile=#{textfile_quoted}:",
           "fontsize=#{font_size}:",
           "fontcolor=white:",
           "line_spacing=#{line_spacing}:",
-          "x=(w-text_w)/2:",
-          "y=(h-text_h)/2",
+          "x='(w-text_w)/2':",
+          "y='(h-text_h)/2'",
           ",format=yuv420p,fade=t=in:st=0:d=0.5,fade=t=out:st=#{[duration - 0.6, 0.0].max}:d=0.6"
         ].join,
         '-c:v', 'libx264', '-c:a', 'aac', '-shortest', '-y', credits_file
@@ -565,20 +565,20 @@ class VideoCompiler
     end
     File.write(credits_txt_path, lines.join("\n").rstrip + "\n")
     font_spec = if (fontfile = find_drawtext_fontfile)
-      "fontfile=#{fontfile.gsub(':', '\\:')}"
+      "fontfile=#{quote_drawtext_value(fontfile)}"
     else
       "font=Helvetica"
     end
-    textfile_escaped = credits_txt_path.gsub(':', '\\:')
+    textfile_quoted = quote_drawtext_value(credits_txt_path)
     # Scroll upward: start below bottom (h + margin_bottom) and move up at speed
     draw = [
       "drawtext=#{font_spec}:",
-      "textfile='#{textfile_escaped}':",
+      "textfile=#{textfile_quoted}:",
       "fontsize=#{font_size}:",
       "fontcolor=white:",
       "line_spacing=#{line_spacing}:",
-      "x=(w-text_w)/2:",
-      "y=h+#{margin_bottom}-(t*#{speed_px_per_s})"
+      "x='(w-text_w)/2':",
+      "y='h+#{margin_bottom}-(t*#{speed_px_per_s})'"
     ].join
     cmd = [
       'ffmpeg',
