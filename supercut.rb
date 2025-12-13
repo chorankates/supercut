@@ -185,8 +185,8 @@ class VideoCompiler
   end
   
   def credits_style
-    style = (ENV['SUPERCUT_CREDITS_STYLE'] || 'pages').downcase
-    %w[pages scroll].include?(style) ? style : 'pages'
+    style = (ENV['SUPERCUT_CREDITS_STYLE'] || 'scroll').downcase
+    %w[pages scroll].include?(style) ? style : 'scroll'
   end
   
   def default_video_properties
@@ -539,6 +539,7 @@ class VideoCompiler
   end
   
   def create_scrolling_credits_clip(map, reference_segment)
+    log('building credits')
     lines = build_scrolling_credits_lines(map)
     create_scrolling_credits_clip_from_lines(lines, reference_segment: reference_segment)
   end
@@ -648,11 +649,13 @@ class VideoCompiler
     cmd_str = cmd.join(' ')
     log(sprintf('running[%s]', cmd_str), :debug)
     status = nil
+    output = Array.new
     Open3.popen2e(*cmd) do |stdin, stdout_and_err, wait_thr|
       stdin.close
       begin
         until stdout_and_err.eof?
           chunk = stdout_and_err.readpartial(4096)
+          output << chunk
           if debug_enabled?
             $stdout.write(chunk)
             $stdout.flush
@@ -663,7 +666,10 @@ class VideoCompiler
       end
       status = wait_thr.value
     end
-    raise "Command failed: #{cmd_str}" unless status.success?
+    unless status.success?
+      puts sprintf('error buffer[%s]', output.join("\n"))
+      raise "Command failed: #{cmd_str}"
+    end
   end
 end
 
