@@ -131,13 +131,14 @@ class VideoCompiler
     end
     
     # Extract segment, add text overlay, and apply fade in single pass
+    # -ss before -i = input seeking (fast, timestamps start near 0)
     vf_filter = build_segment_filter(trail_name, duration, fade_color: fade_color)
     
     cmd = [
       'ffmpeg',
       '-hwaccel', 'auto',
-      '-i', video_path,
       '-ss', start_seconds.to_s,
+      '-i', video_path,
       '-t', duration.to_s,
       '-vf', vf_filter,
       '-c:v', 'libx264',
@@ -151,11 +152,9 @@ class VideoCompiler
   end
   
   def build_segment_filter(trail_name, duration, fade_color: nil)
-    # Build combined filter: setpts (reset timestamps) + drawtext + optional fade + format
-    # setpts=PTS-STARTPTS is critical: when -ss is after -i, the filter sees original
-    # file timestamps. This resets them to start from 0 so fade timing works correctly.
-    filters = ['setpts=PTS-STARTPTS']
-    filters << build_drawtext_filter_raw(trail_name)
+    # Build combined filter: drawtext + optional fade + format
+    # With -ss before -i (input seeking), timestamps already start near 0
+    filters = [build_drawtext_filter_raw(trail_name)]
     
     if fade_color
       fade_start = [duration - TRANSITION_DURATION, 0].max
