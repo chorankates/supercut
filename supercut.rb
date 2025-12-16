@@ -64,23 +64,24 @@ class VideoCompiler
       return
     end
     
-    log(sprintf('processing[%d] video files...', map.size), :info)
+    # Pre-compute total segment count so we know which is last
+    total_segments = map.sum { |_, trails| trails.size }
+    log(sprintf('processing[%d] video files with[%d] segments...', map.size, total_segments), :info)
     
     # Process each segment from the map
     segment_index = 0
     map.each do |video_path, trails|
       trails.each do |trail_name, timestamps|
         start_time, end_time = timestamps
+        is_last = (segment_index == total_segments - 1)
 
-        # TODO we should precompute the segment count so this is more useful
-        log(sprintf('  segment %d: [%s] (%s - %s)', segment_index + 1, trail_name, start_time, end_time), :info)
+        log(sprintf('  segment %d/%d: [%s] (%s - %s)', segment_index + 1, total_segments, trail_name, start_time, end_time), :info)
         
-        # Create segment with overlay
-        segment_file = create_segment(video_path, trail_name, start_time, end_time, segment_index)
+        # Create segment with overlay and fade in single pass
+        # Last segment fades to black, others fade to white
+        fade_color = is_last ? 'black' : 'white'
+        segment_file = create_segment(video_path, trail_name, start_time, end_time, segment_index, fade_color: fade_color)
         @segment_files << segment_file
-        
-        # Create transition (except after the last segment)
-        # We'll add transitions when concatenating
         
         segment_index += 1
       end
@@ -93,6 +94,7 @@ class VideoCompiler
     FileUtils.rm_rf(@temp_dir)
 
     log(sprintf('video compiled successfully[%s]', @output_file), :info)
+    log(sprintf('length[%.2fs] size[%d]', get_video_duration(@output_file), File.stat(@output_file).size))
   end
 
   private
@@ -113,7 +115,7 @@ class VideoCompiler
     end
   end
 
-  def create_segment(video_path, trail_name, start_time, end_time, index)
+  def create_segment(video_path, trail_name, start_time, end_time, index, fade_color: nil)
     start_seconds = parse_timestamp(start_time)
     end_seconds = parse_timestamp(end_time)
     duration = end_seconds - start_seconds
@@ -129,15 +131,17 @@ class VideoCompiler
       return output_file
     end
     
-    # Extract segment and add text overlay
-    # Using drawtext filter to overlay the trail name
+    # Extract segment, add text overlay, and apply fade in single pass
+    # -ss before -i = input seeking (fast, timestamps start near 0)
+    vf_filter = build_segment_filter(trail_name, duration, fade_color: fade_color)
+    
     cmd = [
       'ffmpeg',
       '-hwaccel', 'auto',
-      '-i', video_path,
       '-ss', start_seconds.to_s,
+      '-i', video_path,
       '-t', duration.to_s,
-      '-vf', build_drawtext_filter(trail_name),
+      '-vf', vf_filter,
       '-c:v', 'libx264',
       '-c:a', 'aac',
       '-y',
@@ -147,8 +151,23 @@ class VideoCompiler
     run_command(cmd)
     output_file
   end
-
-  def build_drawtext_filter(text)
+  
+  def build_segment_filter(trail_name, duration, fade_color: nil)
+    # Build combined filter: drawtext + optional fade + format
+    # With -ss before -i (input seeking), timestamps already start near 0
+    filters = [build_drawtext_filter_raw(trail_name)]
+    
+    if fade_color
+      fade_start = [duration - TRANSITION_DURATION, 0].max
+      filters << "fade=t=out:st=#{fade_start}:d=#{TRANSITION_DURATION}:color=#{fade_color}"
+    end
+    
+    filters << "format=yuv420p"
+    filters.join(',')
+  end
+  
+  def build_drawtext_filter_raw(text)
+    # Returns drawtext filter without format=yuv420p (for chaining)
     quoted_text = quote_drawtext_value(text)
     font_spec = if (fontfile = find_drawtext_fontfile)
       "fontfile=#{quote_drawtext_value(fontfile)}"
@@ -163,7 +182,7 @@ class VideoCompiler
     "boxcolor=black@0.5:" \
     "boxborderw=10:" \
     "x='(w-text_w)/2':" \
-    "y='h-th-30',format=yuv420p"
+    "y='h-th-30'"
   end
 
   def quote_drawtext_value(value)
@@ -202,62 +221,18 @@ class VideoCompiler
         return
       end
     end
-    # Create segments with fade-out to white
-    faded_segments = []
+    
+    # Segments already have fades applied from create_segment
+    # Just need to add white transitions between them
+    final_segments = []
     
     @segment_files.each_with_index do |segment, i|
-      # Add fade to white at the end (except for last segment)
+      final_segments << segment
+      
+      # Add white transition after each segment except the last
       if i < @segment_files.size - 1
-        faded_file = File.join(@temp_dir, "faded_#{i.to_s.rjust(4, '0')}.mp4")
-        if clean_requested? && File.exist?(faded_file)
-          remove_if_exists(faded_file)
-        elsif File.exist?(faded_file)
-          log(sprintf('skip: faded exists[%s]', faded_file), :info)
-          next
-        else
-          # Get video duration only if needed
-          duration = get_video_duration(segment)
-          fade_start = duration - TRANSITION_DURATION
-          
-          cmd = [
-            'ffmpeg',
-            '-i', segment,
-            '-vf', "fade=t=out:st=#{fade_start}:d=#{TRANSITION_DURATION}:color=white,format=yuv420p",
-            '-c:v', 'libx264',
-            '-c:a', 'copy',
-            '-y',
-            faded_file
-          ]
-          
-          run_command(cmd)
-        end
-        faded_segments << faded_file
-        
-        # Create white frame transition
         transition_file = create_white_transition(segment, i)
-        faded_segments << transition_file
-      else
-        # Last segment: fade out to black
-        faded_file = File.join(@temp_dir, "faded_#{i.to_s.rjust(4, '0')}.mp4")
-        if clean_requested? && File.exist?(faded_file)
-          remove_if_exists(faded_file)
-        else
-          duration = get_video_duration(segment)
-          fade_start = duration - TRANSITION_DURATION
-          
-          cmd = [
-            'ffmpeg',
-            '-i', segment,
-            '-vf', "fade=t=out:st=#{fade_start}:d=#{TRANSITION_DURATION}:color=black,format=yuv420p",
-            '-c:v', 'libx264',
-            '-c:a', 'copy',
-            '-y',
-            faded_file
-          ]
-          
-          run_command(cmd)
-        end
-        faded_segments << faded_file
+        final_segments << transition_file
       end
     end
 
@@ -265,16 +240,16 @@ class VideoCompiler
     if @segment_files.any?
       if credits_style == 'scroll'
         clip = create_scrolling_credits_clip(map, @segment_files.last)
-        faded_segments << clip if clip
+        final_segments << clip if clip
       else
         credits_clips = create_credits_clips(map, @segment_files.last)
-        credits_clips.each { |clip| faded_segments << clip }
+        credits_clips.each { |clip| final_segments << clip }
       end
     end
     
     # Create concat file list
     concat_file = File.join(@temp_dir, 'concat_list.txt')
-    File.write(concat_file, faded_segments.map { |f| "file '#{f}'" }.join("\n"))
+    File.write(concat_file, final_segments.map { |f| "file '#{f}'" }.join("\n"))
     
     # Concatenate all segments
     cmd = [
@@ -600,7 +575,7 @@ class VideoCompiler
       '-of', 'default=noprint_wrappers=1:nokey=1',
       video_file
     ]
-    
+
     output = `#{cmd.join(' ')}`.strip
     output.to_f
   end
