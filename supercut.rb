@@ -94,6 +94,7 @@ class VideoCompiler
     FileUtils.rm_rf(@temp_dir)
 
     log(sprintf('video compiled successfully[%s]', @output_file), :info)
+    log(sprintf('length[%.2fs] size[%d]', get_video_duration(@output_file), File.stat(@output_file).size))
   end
 
   private
@@ -564,6 +565,19 @@ class VideoCompiler
     ]
     run_command(cmd)
     credits_file
+  end
+
+  def get_video_duration(video_file)
+    cmd = [
+      'ffprobe',
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      video_file
+    ]
+
+    output = `#{cmd.join(' ')}`.strip
+    output.to_f
   end
 
   def get_video_properties(video_file)
