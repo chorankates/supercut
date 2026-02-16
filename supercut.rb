@@ -147,9 +147,12 @@ class VideoCompiler
       return output_file
     end
     
-    # Extract segment, add text overlay, and apply fade in single pass
-    # -ss before -i = input seeking (fast, timestamps start near 0)
-    vf_filter = build_segment_filter(trail_name, duration, fade_color: fade_color)
+    # Write label to temp file so drawtext reads it via textfile= option,
+    # avoiding all ffmpeg filter escaping issues with quotes/special chars.
+    label_file = File.join(@temp_dir, "label_#{index.to_s.rjust(4, '0')}.txt")
+    File.write(label_file, trail_name)
+    
+    vf_filter = build_segment_filter(label_file, duration, fade_color: fade_color)
     
     cmd = [
       'ffmpeg',
@@ -168,10 +171,10 @@ class VideoCompiler
     output_file
   end
   
-  def build_segment_filter(trail_name, duration, fade_color: nil)
+  def build_segment_filter(label_file, duration, fade_color: nil)
     # Build combined filter: drawtext + optional fade + format
     # With -ss before -i (input seeking), timestamps already start near 0
-    filters = [build_drawtext_filter_raw(trail_name)]
+    filters = [build_drawtext_filter_raw(label_file)]
     
     if fade_color
       fade_start = [duration - TRANSITION_DURATION, 0].max
@@ -182,16 +185,17 @@ class VideoCompiler
     filters.join(',')
   end
   
-  def build_drawtext_filter_raw(text)
-    # Returns drawtext filter without format=yuv420p (for chaining)
-    quoted_text = quote_drawtext_value(text)
+  def build_drawtext_filter_raw(label_file)
+    # Uses textfile= to read label from a file, avoiding all inline text
+    # escaping issues with quotes, colons, backslashes, etc.
+    quoted_path = quote_drawtext_value(label_file)
     font_spec = if (fontfile = find_drawtext_fontfile)
       "fontfile=#{quote_drawtext_value(fontfile)}"
     else
       "font=Helvetica"
     end
     "drawtext=#{font_spec}:" \
-    "text=#{quoted_text}:" \
+    "textfile=#{quoted_path}:" \
     "fontsize=48:" \
     "fontcolor=white:" \
     "box=1:" \
@@ -202,12 +206,14 @@ class VideoCompiler
   end
 
   def quote_drawtext_value(value)
-    # Properly quote and escape a value for ffmpeg drawtext filter.
-    # Within single-quoted strings in ffmpeg, backslash is the escape character.
-    # We must escape: \ -> \\, ' -> \'
-    escaped = value
-      .gsub('\\', '\\\\\\\\')  # \ -> \\ (extra escaping for Ruby string + ffmpeg)
-      .gsub("'", "'\\\\''")    # ' -> '\'' (end quote, escaped quote, start quote)
+    # Escape for ffmpeg drawtext filter single-quoted option values.
+    # Since run_command passes the cmd array directly to Open3 (no shell),
+    # ffmpeg receives the string as-is. Inside ffmpeg single-quoted values,
+    # backslash is the escape character:
+    #   \ -> \\  (literal backslash)
+    #   ' -> \'  (literal single quote)
+    # Block form of gsub avoids Ruby replacement-string escaping confusion.
+    escaped = value.gsub(/[\\']/) { |c| "\\#{c}" }
     "'#{escaped}'"
   end
 
