@@ -66,7 +66,23 @@ class VideoCompiler
     
     # Pre-compute total segment count so we know which is last
     total_segments = map.sum { |_, trails| trails.size }
-    log(sprintf('processing[%d] video files with[%d] segments...', map.size, total_segments), :info)
+    
+    # Calculate estimated total duration
+    total_duration_seconds = 0.0
+    map.each do |_, trails|
+      trails.each do |_, timestamps|
+        start_time, end_time = timestamps
+        total_duration_seconds += parse_timestamp(end_time) - parse_timestamp(start_time)
+      end
+    end
+    # Add white transition durations between segments
+    total_duration_seconds += (total_segments - 1) * TRANSITION_DURATION if total_segments > 1
+    
+    duration_min = (total_duration_seconds / 60).floor
+    duration_sec = (total_duration_seconds % 60).round(1)
+    duration_str = sprintf('%d:%05.2f', duration_min, duration_sec)
+    
+    log(sprintf('processing[%d] video files with[%d] segments, compiled duration[%s]', map.size, total_segments, duration_str), :info)
     
     # Process each segment from the map
     segment_index = 0
@@ -94,7 +110,7 @@ class VideoCompiler
     FileUtils.rm_rf(@temp_dir)
 
     log(sprintf('video compiled successfully[%s]', @output_file), :info)
-    log(sprintf('length[%.2fs] size[%d]', get_video_duration(@output_file), File.stat(@output_file).size))
+    log(sprintf('length[%.2fs] size[%d]', get_video_duration(@output_file), File.stat(@output_file).size), :info)
   end
 
   private
