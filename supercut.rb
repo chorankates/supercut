@@ -494,8 +494,9 @@ class VideoCompiler
     (distance / speed_px_per_s.to_f) + 0.5
   end
 
+  # Remove control chars (e.g. \r, \n) and other non-printables so credits render as single lines.
   def credits_sanitize(s)
-    s.to_s.gsub(/\r\n|\r|\n/, ' ').strip
+    s.to_s.gsub(/\p{C}+/, ' ').strip
   end
 
   def build_credits_text(map)
