@@ -35,6 +35,14 @@ class VideoCompiler
     end
     log(sprintf('reading map file[%s]', @map_file), :info)
     map = JSON.parse(File.read(@map_file))
+    # Dump credits text only (for debugging encoding / non-printable chars)
+    if ENV['SUPERCUT_CREDITS_TXT']
+      out_path = ENV['SUPERCUT_CREDITS_TXT']
+      lines = build_scrolling_credits_lines(map)
+      File.write(out_path, lines.join("\n").rstrip + "\n")
+      log(sprintf('credits text written to [%s]', out_path), :info)
+      return
+    end
     # Quick preview mode: generate credits-only and exit
     if ENV['SUPERCUT_CREDITS_PREVIEW'] == '1'
       log('credits preview mode enabled', :info)
