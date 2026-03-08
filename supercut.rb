@@ -494,6 +494,10 @@ class VideoCompiler
     (distance / speed_px_per_s.to_f) + 0.5
   end
 
+  def credits_sanitize(s)
+    s.to_s.gsub(/\r\n|\r|\n/, ' ').strip
+  end
+
   def build_credits_text(map)
     lines = []
     lines << 'Credits'
@@ -502,10 +506,10 @@ class VideoCompiler
     lines << "Generated on #{date_str}"
     lines << ''
     map.each do |video_path, trails|
-      lines << File.basename(video_path.to_s)
+      lines << credits_sanitize(File.basename(video_path.to_s))
       trails.each do |trail_name, timestamps|
         start_t, end_t = timestamps
-        lines << "  • #{trail_name}: #{start_t} – #{end_t}"
+        lines << "  • #{credits_sanitize(trail_name)}: #{credits_sanitize(start_t)} – #{credits_sanitize(end_t)}"
       end
       lines << ''
     end
@@ -522,10 +526,10 @@ class VideoCompiler
   def build_credits_lines(map)
     lines = []
     map.each do |video_path, trails|
-      lines << File.basename(video_path.to_s)
+      lines << credits_sanitize(File.basename(video_path.to_s))
       trails.each do |trail_name, timestamps|
         start_t, end_t = timestamps
-        lines << "  • #{trail_name}: #{start_t} – #{end_t}"
+        lines << "  • #{credits_sanitize(trail_name)}: #{credits_sanitize(start_t)} – #{credits_sanitize(end_t)}"
       end
       lines << ''
     end
