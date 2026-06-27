@@ -30,8 +30,8 @@ help:
 	@echo "  ROTATION=$(ROTATION)            # rotation angle in degrees"
 	@echo ""
 	@echo "Targets:"
-	@echo "  make compile                # Compile full supercut with default credits style (pages)"
-	@echo "  make compile-scroll         # Compile full supercut with scrolling credits"
+	@echo "  make compile                # Compile full supercut with default credits style (scroll)"
+	@echo "  make compile-pages         # Compile full supercut with pages credits"
 	@echo "  make credits-preview        # Credits-only preview (CREDITS_STYLE pages|scroll)"
 	@echo "  make credits-preview-pages  # Credits-only preview (pages)"
 	@echo "  make credits-preview-scroll # Credits-only preview (scroll)"
@@ -44,8 +44,8 @@ help:
 compile:
 	$(RUBY) $(SCRIPT) $(MAP) $(OUTPUT)
 
-compile-scroll:
-	SUPERCUT_CREDITS_STYLE=scroll $(RUBY) $(SCRIPT) $(MAP) $(OUTPUT)
+compile-pages:
+	SUPERCUT_CREDITS_STYLE=pages $(RUBY) $(SCRIPT) $(MAP) $(OUTPUT)
 
 credits-preview:
 	SUPERCUT_CREDITS_PREVIEW=1 SUPERCUT_CREDITS_STYLE=$(CREDITS_STYLE) SUPERCUT_SCROLL_SPEED=$(SCROLL_SPEED) \
