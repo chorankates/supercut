@@ -375,14 +375,14 @@ class VideoCompiler
       if clean_requested? && File.exist?(credits_txt_path)
         remove_if_exists(credits_txt_path)
       end
+      # Optionally append page indicator at bottom if multiple pages
+      page_lines_with_footer = if total_pages > 1
+        page_lines + ['',
+                      "Page #{i + 1} of #{total_pages}"]
+      else
+        page_lines
+      end
       if !File.exist?(credits_txt_path)
-        # Optionally append page indicator at bottom if multiple pages
-        page_lines_with_footer = if total_pages > 1
-          page_lines + ['',
-                        "Page #{i + 1} of #{total_pages}"]
-        else
-          page_lines
-        end
         File.write(credits_txt_path, page_lines_with_footer.join("\n").rstrip + "\n")
       end
       unless File.exist?(credits_file)
@@ -392,7 +392,12 @@ class VideoCompiler
         else
           "font=Helvetica"
         end
-        textfile_quoted = quote_drawtext_value(credits_txt_path)
+        line_height = font_size + line_spacing
+        block_height = page_lines_with_footer.size * line_height
+        draw = build_credits_drawtext_chain(
+          page_lines_with_footer, font_spec, font_size, "credits_page_#{page_num}",
+          ->(idx) { "(h-#{block_height})/2+#{idx * line_height}" }
+        )
         cmd = [
           'ffmpeg',
           '-f', 'lavfi',
@@ -400,19 +405,7 @@ class VideoCompiler
           '-f', 'lavfi',
           '-i', 'anullsrc',
           '-vf',
-          [
-            "drawtext=#{font_spec}:",
-            "textfile=#{textfile_quoted}:",
-            "fontsize=#{font_size}:",
-            "fontcolor=white:",
-            "line_spacing=#{line_spacing}:",
-            "box=1:",
-            "boxcolor=black@0.0:",
-            "boxborderw=0:",
-            "x='(w-text_w)/2':",
-            "y='(h-text_h)/2'",
-            ",format=yuv420p,fade=t=in:st=0:d=0.5,fade=t=out:st=#{[duration - 0.6, 0.0].max}:d=0.6"
-          ].join,
+          "#{draw},format=yuv420p,fade=t=in:st=0:d=0.5,fade=t=out:st=#{[duration - 0.6, 0.0].max}:d=0.6",
           '-c:v', 'libx264',
           '-c:a', 'aac',
           '-shortest',
@@ -450,28 +443,25 @@ class VideoCompiler
       page_num = (i + 1).to_s.rjust(3, '0')
       credits_file = File.join(@temp_dir, "credits_preview_page_#{page_num}.mp4")
       credits_txt_path = File.join(@temp_dir, "credits_preview_page_#{page_num}.txt")
-      File.write(credits_txt_path, (page_lines + (total_pages > 1 ? ['', "Page #{i + 1} of #{total_pages}"] : [])).join("\n").rstrip + "\n")
+      page_lines_with_footer = page_lines + (total_pages > 1 ? ['', "Page #{i + 1} of #{total_pages}"] : [])
+      File.write(credits_txt_path, page_lines_with_footer.join("\n").rstrip + "\n")
       duration = compute_credits_duration_seconds(File.read(credits_txt_path))
       font_spec = if (fontfile = find_drawtext_fontfile)
         "fontfile=#{quote_drawtext_value(fontfile)}"
       else
         "font=Helvetica"
       end
-      textfile_quoted = quote_drawtext_value(credits_txt_path)
+      line_height = font_size + line_spacing
+      block_height = page_lines_with_footer.size * line_height
+      draw = build_credits_drawtext_chain(
+        page_lines_with_footer, font_spec, font_size, "credits_preview_page_#{page_num}",
+        ->(idx) { "(h-#{block_height})/2+#{idx * line_height}" }
+      )
       cmd = [
         'ffmpeg', '-f', 'lavfi', '-i', "color=black:s=#{width}x#{height}:r=#{fps}:d=#{duration}",
         '-f', 'lavfi', '-i', 'anullsrc',
         '-vf',
-        [
-          "drawtext=#{font_spec}:",
-          "textfile=#{textfile_quoted}:",
-          "fontsize=#{font_size}:",
-          "fontcolor=white:",
-          "line_spacing=#{line_spacing}:",
-          "x='(w-text_w)/2':",
-          "y='(h-text_h)/2'",
-          ",format=yuv420p,fade=t=in:st=0:d=0.5,fade=t=out:st=#{[duration - 0.6, 0.0].max}:d=0.6"
-        ].join,
+        "#{draw},format=yuv420p,fade=t=in:st=0:d=0.5,fade=t=out:st=#{[duration - 0.6, 0.0].max}:d=0.6",
         '-c:v', 'libx264', '-c:a', 'aac', '-shortest', '-y', credits_file
       ]
       run_command(cmd)
@@ -497,6 +487,36 @@ class VideoCompiler
   # Remove control chars (e.g. \r, \n) and other non-printables so credits render as single lines.
   def credits_sanitize(s)
     s.to_s.gsub(/\p{C}+/, ' ').strip
+  end
+
+  # Build a chain of drawtext filters, one per line of text.
+  #
+  # ffmpeg 8.x drawtext renders an interior newline (0x0A) as a missing-glyph box
+  # (U+FFFD) at the end of every line, in addition to breaking the line. To avoid
+  # this we never feed a multi-line buffer to a single drawtext; instead each line
+  # gets its own drawtext that reads a single-line textfile. Reading from a file
+  # keeps the text literal (no filtergraph escaping for filenames/trail names), and
+  # expansion=none stops characters like % from being interpreted.
+  #
+  # +y_for_index+ is called with each line's index and returns its y expression.
+  def build_credits_drawtext_chain(lines, font_spec, font_size, file_prefix, y_for_index)
+    filters = []
+    lines.each_with_index do |line, i|
+      text = line.to_s
+      next if text.empty? # blank lines only reserve vertical space; nothing to draw
+      path = File.join(@temp_dir, "#{file_prefix}_line_#{i.to_s.rjust(3, '0')}.txt")
+      File.write(path, text)
+      filters << [
+        "drawtext=#{font_spec}:",
+        "textfile=#{quote_drawtext_value(path)}:",
+        "fontsize=#{font_size}:",
+        "fontcolor=white:",
+        "expansion=none:",
+        "x='(w-text_w)/2':",
+        "y='#{y_for_index.call(i)}'"
+      ].join
+    end
+    filters.join(',')
   end
 
   def build_credits_text(map)
@@ -580,17 +600,14 @@ class VideoCompiler
     else
       "font=Helvetica"
     end
-    textfile_quoted = quote_drawtext_value(credits_txt_path)
-    # Scroll upward: start below bottom (h + margin_bottom) and move up at speed
-    draw = [
-      "drawtext=#{font_spec}:",
-      "textfile=#{textfile_quoted}:",
-      "fontsize=#{font_size}:",
-      "fontcolor=white:",
-      "line_spacing=#{line_spacing}:",
-      "x='(w-text_w)/2':",
-      "y='h+#{margin_bottom}-(t*#{speed_px_per_s})'"
-    ].join
+    line_height = font_size + line_spacing
+    # Scroll upward: line 0 starts just below the bottom (h + margin_bottom) and the
+    # whole block moves up at speed; later lines sit a line-height lower so they
+    # enter after the ones above them.
+    draw = build_credits_drawtext_chain(
+      lines, font_spec, font_size, 'credits_scroll',
+      ->(idx) { "h+#{margin_bottom}-(t*#{speed_px_per_s})+#{idx * line_height}" }
+    )
     cmd = [
       'ffmpeg',
       '-f', 'lavfi', '-i', "color=black:s=#{w}x#{h}:r=#{r}:d=#{duration}",
